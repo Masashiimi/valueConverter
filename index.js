@@ -1,50 +1,91 @@
-const fs = require('fs');
-const ExcelJS = require('exceljs');
-const readline = require('readline');
+const fs = require("fs");
+const path = require("path");
+const ExcelJS = require("exceljs");
+const readline = require("readline");
 
-async function processExcelAndSQL() {
-    const fichierExcel = 'data.xlsx';
-    const workbook = new ExcelJS.Workbook();
+function askQuestion(query) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-    await workbook.xlsx.readFile(fichierExcel);
-
-    const sheet = workbook.getWorksheet(1); 
-
-    const valeurs = [];
-    sheet.eachRow((row, rowNumber) => {
-        const firstCellValue = row.getCell(1).value; 
-        valeurs.push(firstCellValue || ''); x
-    });
-
-    console.log('Valeurs extraites :', valeurs);
-
-   
-    const fichierSQL = 'insert.sql';
-    let requetesSQL = fs.readFileSync(fichierSQL, 'utf-8').split('\n');
-
-    function remplacerTmpDansRequetes(requetes, valeurs) {
-        if (valeurs.length < requetes.length) {
-            console.log("Attention : Moins de valeurs que de requêtes. Certaines requêtes ne seront pas modifiées.");
-        }
-
-        return requetes.map((requete, index) => {
-            if (index < valeurs.length) {
-                return requete.replace('tmp', valeurs[index] || ''); 
-            }
-            return requete; 
-        });
-    }
-
-    const nouvellesRequetes = remplacerTmpDansRequetes(requetesSQL, valeurs);
-
-    const contenuFichierFinal = nouvellesRequetes.join('\n');
-
-    const fichierSortie = 'output.sql';
-    fs.writeFileSync(fichierSortie, contenuFichierFinal, 'utf-8');
-
-    console.log(`Les requêtes ont été mises à jour et enregistrées dans le fichier ${fichierSortie}.`);
+  return new Promise((resolve) =>
+    rl.question(query, (answer) => {
+      rl.close();
+      resolve(answer);
+    })
+  );
 }
 
-processExcelAndSQL().catch(err => {
-    console.error('Erreur lors de l\'exécution du script :', err);
+async function processExcelAndSQL() {
+  const fichierExcel = await askQuestion(
+    "Veuillez entrer le chemin du fichier Excel (.xlsx) : "
+  );
+  const dossierSortie = await askQuestion(
+    "Veuillez entrer le chemin du dossier de sortie pour les fichiers SQL : "
+  );
+  const codeClient = await askQuestion(
+    "Veuillez entrer le code client (account_id) : "
+  );
+
+  const workbook = new ExcelJS.Workbook();
+
+  try {
+    await workbook.xlsx.readFile(fichierExcel);
+
+    const sheet = workbook.getWorksheet(1);
+    const valeurs = [];
+
+    sheet.eachRow((row) => {
+      const firstCellValue = row.getCell(1).value;
+      valeurs.push(firstCellValue || "");
+    });
+
+    console.log("Valeurs extraites :", valeurs);
+
+    if (
+      !fs.existsSync(dossierSortie) ||
+      !fs.lstatSync(dossierSortie).isDirectory()
+    ) {
+      console.log("Le chemin spécifié n'est pas un répertoire valide.");
+      return;
+    }
+
+    const requetesCart = valeurs.map((valeur) => {
+      return `INSERT IGNORE INTO cart (customer_code, account_id) VALUES ('${valeur}', ${codeClient});`;
+    });
+
+    const requetesCustomerAccount = valeurs.map((valeur) => {
+      return `INSERT IGNORE INTO customer_account (customer_code, account_id) VALUES ('${valeur}', ${codeClient});`;
+    });
+
+    const fichierCart = path.join(dossierSortie, "cart_insert.sql");
+    const fichierCustomerAccount = path.join(
+      dossierSortie,
+      "customer_account_insert.sql"
+    );
+
+    fs.writeFileSync(fichierCart, requetesCart.join("\n"), "utf-8");
+    fs.writeFileSync(
+      fichierCustomerAccount,
+      requetesCustomerAccount.join("\n"),
+      "utf-8"
+    );
+
+    console.log(
+      `Les requêtes pour 'cart' ont été générées dans le fichier : ${fichierCart}`
+    );
+    console.log(
+      `Les requêtes pour 'customer_account' ont été générées dans le fichier : ${fichierCustomerAccount}`
+    );
+  } catch (error) {
+    console.error(
+      "Erreur lors de la lecture du fichier Excel ou de l'écriture des fichiers SQL :",
+      error
+    );
+  }
+}
+
+processExcelAndSQL().catch((err) => {
+  console.error("Erreur lors de l'exécution du script :", err);
 });
